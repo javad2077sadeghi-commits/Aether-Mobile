@@ -279,7 +279,7 @@ public class MainActivity extends Activity {
         chatContainer.addView(loader);
         scrollToBottom();
 
-        TextView aiBubble = null;
+        final TextView[] aiBubbleHolder = {null};
 
         executor.execute(() -> {
             try {
@@ -312,13 +312,11 @@ public class MainActivity extends Activity {
                             response.append(chunk.getString("response"));
                             final String partial = response.toString();
                             mainHandler.post(() -> {
-                                if (aiBubble == null) {
-                                    mainHandler.post(() -> {
-                                        loader.setVisibility(View.GONE);
-                                    });
-                                    aiBubble = addBubble(partial, false);
+                                if (aiBubbleHolder[0] == null) {
+                                    loader.setVisibility(View.GONE);
+                                    aiBubbleHolder[0] = addBubble(partial, false);
                                 } else {
-                                    aiBubble.setText(partial);
+                                    aiBubbleHolder[0].setText(partial);
                                 }
                                 scrollToBottom();
                             });
@@ -327,7 +325,7 @@ public class MainActivity extends Activity {
                 }
                 reader.close();
 
-                if (aiBubble == null) {
+                if (aiBubbleHolder[0] == null) {
                     mainHandler.post(() -> {
                         loader.setVisibility(View.GONE);
                         addBubble(response.length() > 0 ? response.toString() : "No response.", false);
