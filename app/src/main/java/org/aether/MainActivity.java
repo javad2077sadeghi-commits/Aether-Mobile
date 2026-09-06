@@ -3,8 +3,6 @@ package org.aether;
 import android.app.Activity;
 import android.content.SharedPreferences;
 import android.graphics.Color;
-import android.net.nsd.NsdManager;
-import android.net.nsd.NsdServiceInfo;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -37,12 +35,8 @@ public class MainActivity extends Activity {
     private LinearLayout webScreen;
     private TextView statusText;
     private ProgressBar progressBar;
-    private NsdManager nsdManager;
-    private String discoveredUrl = null;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private static final String SERVICE_TYPE = "_aether._tcp.local.";
-    private static final String TAG = "Aether";
     private boolean connected = false;
 
     @Override
@@ -69,9 +63,7 @@ public class MainActivity extends Activity {
         String savedUrl = prefs.getString("server_url", "");
         if (!savedUrl.isEmpty()) {
             showLoading();
-            testAndConnect(savedUrl);
-        } else {
-            startDiscovery();
+            autoConnect(savedUrl);
         }
     }
 
@@ -101,7 +93,7 @@ public class MainActivity extends Activity {
         layout.addView(title);
 
         TextView subtitle = new TextView(this);
-        subtitle.setText("Searching for your PC...");
+        subtitle.setText("Enter your PC's IP address");
         subtitle.setTextSize(14);
         subtitle.setTextColor(Color.parseColor("#8e8e8e"));
         subtitle.setGravity(Gravity.CENTER);
@@ -109,22 +101,22 @@ public class MainActivity extends Activity {
         layout.addView(subtitle);
 
         EditText ipInput = new EditText(this);
-        ipInput.setHint("Or enter IP manually (e.g. 192.168.1.100:5000)");
+        ipInput.setHint("e.g. 10.71.62.16:5000");
         ipInput.setTextColor(Color.WHITE);
         ipInput.setHintTextColor(Color.parseColor("#8e8e8e"));
         ipInput.setBackgroundColor(Color.parseColor("#2f2f2f"));
         ipInput.setPadding(24, 20, 24, 20);
-        ipInput.setTextSize(14);
+        ipInput.setTextSize(16);
         ipInput.setSingleLine(true);
         LinearLayout.LayoutParams ipP = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        ipP.bottomMargin = 16;
+        ipP.bottomMargin = 20;
         ipInput.setLayoutParams(ipP);
         layout.addView(ipInput);
 
         Button connectBtn = new Button(this);
-        connectBtn.setText("Connect Manually");
+        connectBtn.setText("Connect");
         connectBtn.setTextColor(Color.WHITE);
-        connectBtn.setBackgroundColor(Color.parseColor("#2f2f2f"));
+        connectBtn.setBackgroundColor(Color.parseColor("#10a37f"));
         connectBtn.setPadding(24, 16, 24, 16);
         connectBtn.setOnClickListener(v -> {
             String ip = ipInput.getText().toString().trim();
@@ -133,7 +125,7 @@ public class MainActivity extends Activity {
                 if (!ip.contains(":")) ip += ":5000";
                 getSharedPreferences("aether", MODE_PRIVATE).edit().putString("server_url", ip).apply();
                 showLoading();
-                testAndConnect(ip);
+                autoConnect(ip);
             }
         });
         layout.addView(connectBtn);
@@ -160,6 +152,7 @@ public class MainActivity extends Activity {
         statusText.setTextSize(16);
         statusText.setTextColor(Color.WHITE);
         statusText.setGravity(Gravity.CENTER);
+        statusText.setPadding(20, 0, 20, 0);
         layout.addView(statusText);
 
         return layout;
@@ -199,7 +192,13 @@ public class MainActivity extends Activity {
         webScreen.setVisibility(View.VISIBLE);
     }
 
-    private void testAndConnect(String url) {
+    private void showSetup() {
+        setupScreen.setVisibility(View.VISIBLE);
+        loadingScreen.setVisibility(View.GONE);
+        webScreen.setVisibility(View.GONE);
+    }
+
+    private void autoConnect(String url) {
         statusText.setText("Connecting to " + url + "...");
         executor.execute(() -> {
             try {
@@ -215,63 +214,21 @@ public class MainActivity extends Activity {
                         showWeb();
                     });
                 } else {
-                    handler.post(() -> {
-                        statusText.setText("Connection failed. Retrying...");
-                        handler.postDelayed(() -> testAndConnect(url), 5000);
-                    });
+                    retry(url);
                 }
             } catch (Exception e) {
-                handler.post(() -> {
-                    statusText.setText("PC not found. Retrying...");
-                    handler.postDelayed(() -> testAndConnect(url), 5000);
-                });
+                retry(url);
             }
         });
     }
 
-    private void startDiscovery() {
-        showLoading();
-        statusText.setText("Searching for Aether on your network...");
-        nsdManager = (NsdManager) getSystemService(NSD_SERVICE);
-        try {
-            nsdManager.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, new NsdManager.DiscoveryListener() {
-                @Override public void onDiscoveryStarted(String serviceType) {}
-                @Override public void onDiscoveryStopped(serviceType) {}
-                @Override public void onServiceFound(NsdServiceInfo service) {
-                    if (service.getServiceType().contains("_aether")) {
-                        nsdManager.resolveService(service, new NsdManager.ResolveListener() {
-                            @Override public void onResolveFailed(NsdServiceInfo s, int errorCode) {}
-                            @Override public void onServiceResolved(NsdServiceInfo s) {
-                                try {
-                                    String host = s.getHost().getHostAddress();
-                                    int port = s.getPort();
-                                    discoveredUrl = "http://" + host + ":" + port;
-                                    SharedPreferences.Editor ed = getSharedPreferences("aether", MODE_PRIVATE).edit();
-                                    ed.putString("server_url", discoveredUrl);
-                                    ed.apply();
-                                    handler.post(() -> testAndConnect(discoveredUrl));
-                                } catch (Exception ignored) {}
-                            }
-                        });
-                    }
-                }
-                @Override public void onServiceLost(NsdServiceInfo service) {}
-                @Override public void onStartDiscoveryFailed(String serviceType, int errorCode) {
-                    handler.post(() -> {
-                        statusText.setText("Auto-discovery failed. Enter IP manually.");
-                    });
-                }
-                @Override public void onStopDiscoveryFailed(String serviceType, int errorCode) {}
+    private void retry(String url) {
+        if (!connected) {
+            handler.post(() -> {
+                statusText.setText("PC not found. Retrying in 5s...");
+                handler.postDelayed(() -> autoConnect(url), 5000);
             });
-        } catch (Exception e) {
-            statusText.setText("Auto-discovery not available. Enter IP manually.");
         }
-
-        handler.postDelayed(() -> {
-            if (!connected && discoveredUrl == null) {
-                try { nsdManager.stopServiceDiscovery(null); } catch (Exception ignored) {}
-            }
-        }, 10000);
     }
 
     @Override
@@ -280,18 +237,7 @@ public class MainActivity extends Activity {
             webView.goBack();
         } else {
             getSharedPreferences("aether", MODE_PRIVATE).edit().clear().apply();
-            if (nsdManager != null) {
-                try { nsdManager.stopServiceDiscovery(null); } catch (Exception ignored) {}
-            }
-            super.onBackPressed();
+            showSetup();
         }
-    }
-
-    @Override
-    protected void onDestroy() {
-        if (nsdManager != null) {
-            try { nsdManager.stopServiceDiscovery(null); } catch (Exception ignored) {}
-        }
-        super.onDestroy();
     }
 }
